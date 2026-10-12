@@ -1,0 +1,22 @@
+[project]
+name = "sber-hakaton"
+version = "0.1.0"
+description = ""
+authors = [
+    {name = "max1m111an",email = "maksimilianbegunov@inbox.ru"}
+]
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "sqlalchemy (>=2.1.4,<3.0.0)",
+    "asyncpg (>=0.30.0,<0.31.0)",
+    "greenlet (>=3.2.0,<4.0.0)",
+    "fastapi (>=0.143.0,<0.144.0)",
+    "dotenv (>=0.9.9,<0.10.0)",
+    "uvicorn (>=0.54.0,<0.55.0)"
+]
+
+
+[build-system]
+requires = ["poetry-core>=2.0.0,<3.0.0"]
+build-backend = "poetry.core.masonry.api"

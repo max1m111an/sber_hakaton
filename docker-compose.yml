@@ -1,0 +1,21 @@
+services:
+  fastapi:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        APP_PORT: ${APP_PORT:-8080}
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:${APP_PORT:-8080}"
+    env_file:
+      - .env
+    volumes:
+      - ./apps/backend:/app/apps/backend
+      - ./database:/app/database
+    networks:
+      - app_network
+
+networks:
+  app_network:
+    driver: bridge
