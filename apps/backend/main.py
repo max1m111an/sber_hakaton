@@ -1,6 +1,7 @@
 import logging
 from contextlib import asynccontextmanager
 from fastapi import FastAPI
+from apps.backend.api.v1 import api_router
 from database import init_db
 
 logger = logging.getLogger(__name__)
@@ -16,6 +17,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(lifespan=lifespan)
+app.include_router(api_router)
 
 
 @app.get("/hello")

@@ -1,10 +1,11 @@
 from decimal import Decimal
 
-from sqlalchemy import Boolean, Float, Integer, Numeric, String, Text
+from sqlalchemy import Boolean, Float, ForeignKey, Integer, Numeric, String, Text
 from sqlalchemy.dialects.postgresql import JSONB
-from sqlalchemy.orm import Mapped, mapped_column
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from database.db_engine import Base
+from database.models.category import Category
 
 
 class Product(Base):
@@ -25,3 +26,8 @@ class Product(Base):
     unit: Mapped[str] = mapped_column(String)
     status: Mapped[bool] = mapped_column(Boolean)
     characteristics: Mapped[list] = mapped_column(JSONB, default=list)
+    category_id: Mapped[int | None] = mapped_column(
+        ForeignKey("category.id"), nullable=True, index=True
+    )
+
+    category: Mapped[Category | None] = relationship(back_populates="products")

@@ -26,3 +26,4 @@ class Category(Base):
         back_populates="parent",
         cascade="all, delete-orphan",
     )
+    products: Mapped[list["Product"]] = relationship(back_populates="category")
