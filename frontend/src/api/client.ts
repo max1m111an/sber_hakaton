@@ -20,6 +20,10 @@ export interface ProductBrief {
     coverage_per_package: number;
     coverage_unit: string;
     moisture_resistant: boolean | null;
+    /** Уверенность ML-модели в типе работ товара */
+    match_confidence: number | null;
+    /** ml — предсказание модели, manager — решение менеджера */
+    match_source: string | null;
 }
 
 export interface Alternative extends ProductBrief {
@@ -206,8 +210,16 @@ export interface MatchedProduct {
     category_id: number | null;
     work_type: string | null;
     work_type_name: string | null;
+    /** Уверенность модели (вероятность предсказанного класса) */
     confidence: number;
+    /** ml | manager */
     source: string | null;
+    /** Участвует в подборе: уверенность ≥ порога или решение менеджера */
+    accepted: boolean;
+    /** Метка обучающей выборки: правила или менеджер */
+    label_work_type: string | null;
+    label_source: string | null;
+    agrees_with_label: boolean | null;
     moisture_resistant: boolean | null;
     suitable_rooms: string[];
     price: number;
@@ -218,22 +230,64 @@ export interface MatchedList {
     total: number;
     page: number;
     per_page: number;
+    threshold: number;
 }
 
 export interface WorkType {
+    id: number;
     code: string;
     name: string;
+    /** Принято в подбор (уверенность ≥ порога или менеджер) */
     products: number;
+    /** Всего отнесено моделью */
+    predicted: number;
+}
+
+export interface ClassMetric {
+    precision: number;
+    recall: number;
+    f1: number;
+    support: number;
+}
+
+export interface MLStatus {
+    state: string;
+    stage?: string | null;
+    processed?: number;
+    total?: number;
+    error?: string;
+}
+
+export interface MLInfo {
+    ready: boolean;
+    encoder: string;
+    threshold: number;
+    status: MLStatus;
+    trained_at?: number;
+    train_size?: number;
+    label_sources?: Record<string, number> | null;
+    holdout?: {
+        holdout_size: number; accuracy: number; macro_f1: number; weighted_f1: number;
+        precision_at_threshold: number; recall_at_threshold: number;
+    };
+    per_class?: Record<string, ClassMetric>;
+    predictions?: {
+        products: number; predicted: number; accepted: number; new_beyond_rules: number;
+        agreement_with_rules: number | null; manager_labels: number; mean_confidence: number;
+    };
+    live?: { mean_confidence: number | null; confidence_buckets: { bucket: string; count: number }[] };
 }
 
 export interface Stats {
     products: number;
     categories: number;
     classified: number;
+    predicted: number;
     with_package: number;
     by_source: Record<string, number>;
     rules: number;
     import_state: string | null;
+    ml: MLInfo;
 }
 
 export interface Health {
@@ -241,6 +295,7 @@ export interface Health {
     db: string;
     products: number | null;
     import: { state: string; processed?: number; error?: string };
+    ml?: MLStatus & { ready: boolean };
 }
 
 // ------------------------------------------------------------------ транспорт
@@ -308,7 +363,19 @@ export const getProduct = (id: number, signal?: AbortSignal) =>
 export const calcProduct = (id: number, body: ProductCalcRequest, signal?: AbortSignal) =>
     post<ProductCalc>(`/api/v1/product/${id}/calc`, body, signal);
 
-export const matchedProducts = (params: { q?: string; work_type?: string; max_confidence?: number; page?: number; per_page?: number }, signal?: AbortSignal) =>
+export interface MatchedParams {
+    q?: string;
+    work_type?: string;
+    min_confidence?: number;
+    max_confidence?: number;
+    disagree?: boolean;
+    sort?: "confidence_asc" | "confidence_desc";
+    page?: number;
+    per_page?: number;
+}
+
+/** GET /api/v1/match/products — предсказания ML-модели по каталогу. */
+export const matchedProducts = (params: MatchedParams, signal?: AbortSignal) =>
     request<MatchedList>("/api/v1/match/products" + query(params), { signal });
 
 export const updateMatch = (id: number, work_type?: string) =>
@@ -323,3 +390,6 @@ export const getWorkTypes = (signal?: AbortSignal) => request<WorkType[]>("/api/
 export const getStats = (signal?: AbortSignal) => request<Stats>("/api/v1/stats", { signal });
 
 export const getHealth = (signal?: AbortSignal) => request<Health>("/api/v1/health", { signal });
+
+/** POST /api/v1/ml/train — переобучить модель на текущих метках (в фоне). */
+export const trainModel = () => post<{ state: string }>("/api/v1/ml/train", {});

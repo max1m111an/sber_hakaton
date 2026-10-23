@@ -277,3 +277,6 @@ packages/react-devtools-cdt-mcp/dist
 
 # выгрузка каталога (274 МБ, больше лимита GitHub в 100 МБ)
 products_final.json
+
+# артефакты ML-матчинга (классификатор, кеш эмбеддингов)
+ml_artifacts/

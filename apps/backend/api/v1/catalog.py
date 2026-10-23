@@ -12,7 +12,7 @@ import math
 from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.backend.schemas.catalog import (
@@ -98,7 +98,8 @@ async def products_list(
     brand_id: int | None = None,
     price_min: Annotated[float | None, Query(ge=0)] = None,
     price_max: Annotated[float | None, Query(ge=0)] = None,
-    work_type: Annotated[str | None, Query(description="Тип работ RepairCalc, напр. floor_tile")] = None,
+    work_type: Annotated[str | None, Query(description="Тип работ (предсказание ML-модели), напр. floor_tile")] = None,
+    min_confidence: Annotated[float | None, Query(ge=0, le=1, description="Мин. уверенность модели в типе работ")] = None,
     moisture_resistant: bool | None = None,
     sort: Literal["id", "price_asc", "price_desc", "name"] = "id",
 ):
@@ -124,6 +125,8 @@ async def products_list(
         conditions.append(Product.result_price <= price_max)
     if work_type:
         conditions.append(Product.work_type == work_type)
+    if min_confidence is not None:
+        conditions.append(or_(Product.match_confidence >= min_confidence, Product.match_source == "manager"))
     if moisture_resistant is not None:
         conditions.append(Product.moisture_resistant.is_(moisture_resistant))
 

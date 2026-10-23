@@ -10,7 +10,9 @@
   * размеры рулона (обои) и листа (панели) → площадь одной единицы продажи;
   * норма расхода из характеристик, если она указана и выглядит правдоподобно;
   * влагостойкость (True / False / None — неизвестно);
-  * тип работ (см. classifier.py).
+  * метка для обучения ML (ml/weak_labels.py). Сам тип работ товару
+    присваивает модель (ml/pipeline.py), после чего производные поля
+    пересчитываются функцией derive_fields под предсказанный тип.
 """
 from __future__ import annotations
 
@@ -21,7 +23,8 @@ from decimal import Decimal, InvalidOperation
 from pathlib import Path
 from typing import Any, Iterator
 
-from database.classifier import classify, detect_moisture
+from database.work_types import detect_moisture
+from ml.weak_labels import weak_label
 
 MARKETING_KEY = "Маркетинговое описание товара"
 
@@ -309,6 +312,29 @@ def category_slug(url_key: str | None) -> str | None:
     return parts[1] if len(parts) >= 3 and parts[0] == "catalog" else None
 
 
+def chars_dict(chars_list: list[dict] | None) -> dict[str, str]:
+    return {c["name"]: str(c["value"]) for c in (chars_list or []) if c.get("name") and c.get("value") is not None}
+
+
+def derive_fields(name: str, unit: str | None, chars: dict[str, str], price: Decimal,
+                  work_type: str | None) -> dict[str, Any]:
+    """Фасовка, норма расхода и влагостойкость. Тип работ подсказывает, как читать размеры
+    (рулон обоев, лист панели, длина плинтуса) — сама математика расхода от него не зависит."""
+    pack = parse_pack(name, unit, chars, work_type)
+    price_per_m2 = (price / Decimal(str(pack.area_m2))).quantize(Decimal("0.01")) if pack.area_m2 else None
+    return {
+        "package_area": pack.area_m2,
+        "quantity_in_package": pack.quantity,
+        "package_weight_kg": pack.weight_kg,
+        "package_volume_l": pack.volume_l,
+        "package_length_m": pack.length_m,
+        "pack_source": ", ".join(dict.fromkeys(pack.sources)) or None,
+        "price_per_m2": price_per_m2,
+        "consumption_rate": parse_consumption(chars, work_type),
+        "moisture_resistant": detect_moisture(name, chars, work_type),
+    }
+
+
 def normalize_product(raw: dict[str, Any]) -> dict[str, Any]:
     """Строка таблицы product из исходного товара выгрузки."""
     chars_list = [
@@ -321,11 +347,8 @@ def normalize_product(raw: dict[str, Any]) -> dict[str, Any]:
     unit = raw.get("unit")
     cat_id, cat_name = category_of(raw)
 
-    cls = classify(cat_name, name, chars)
-    work_type = cls.work_type
-    pack = parse_pack(name, unit, chars, work_type)
+    label = weak_label(cat_name, name)   # только метка для обучения и подсказка разбора фасовки
     price = to_decimal(raw.get("price") or 0)
-    price_per_m2 = (price / Decimal(str(pack.area_m2))).quantize(Decimal("0.01")) if pack.area_m2 else None
 
     sku = chars.get("Артикул производителя")
     if not sku:
@@ -352,19 +375,14 @@ def normalize_product(raw: dict[str, Any]) -> dict[str, Any]:
         "status": True,
         "characteristics": chars_list,
         "category_id": cat_id,
-        # фасовка и производные поля
-        "package_area": pack.area_m2,
-        "quantity_in_package": pack.quantity,
-        "package_weight_kg": pack.weight_kg,
-        "package_volume_l": pack.volume_l,
-        "package_length_m": pack.length_m,
-        "pack_source": ", ".join(dict.fromkeys(pack.sources)) or None,
-        "price_per_m2": price_per_m2,
-        "consumption_rate": parse_consumption(chars, work_type),
-        "moisture_resistant": detect_moisture(name, chars, work_type),
-        "work_type": work_type,
-        "match_confidence": cls.confidence,
-        "match_source": cls.source,
+        # фасовка и производные поля (пересчитываются под тип работ, предсказанный моделью)
+        **derive_fields(name, unit, chars, price, label),
+        # тип работ ставит ML-модель (ml/pipeline.py)
+        "work_type": None,
+        "match_confidence": 0.0,
+        "match_source": None,
+        "label_work_type": label,
+        "label_source": "rules" if label else None,
     }
 
 
@@ -386,7 +404,7 @@ def collect_category(acc: dict[int, CategoryAcc], raw: dict[str, Any], row: dict
         slug = category_slug(raw.get("url_key")) or f"category-{cat_id}"
         c = acc[cat_id] = CategoryAcc(cat_id, cat_name or f"Категория {cat_id}", slug)
     c.product_count += 1
-    if row.get("work_type"):
+    if row.get("work_type"):   # при импорте пусто — тип работ категорий считает ML-пайплайн
         c.work_types[row["work_type"]] = c.work_types.get(row["work_type"], 0) + 1
 
 

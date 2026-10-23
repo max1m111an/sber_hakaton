@@ -11,8 +11,9 @@ from database.models.category import Category
 class Product(Base):
     """Товар каталога.
 
-    Поля 1-в-1 из выгрузки (id, cod_good, name, ...), плюс производные поля,
-    которые импорт вычисляет из характеристик: фасовка, влагостойкость, тип работ.
+    Поля 1-в-1 из выгрузки (id, cod_good, name, ...), плюс производные поля:
+    фасовка и влагостойкость (импорт, из характеристик) и тип работ
+    (предсказание ML-модели, ml/matching.py).
     """
 
     __tablename__ = "product"
@@ -52,8 +53,12 @@ class Product(Base):
 
     # --- матчинг к типам работ
     moisture_resistant: Mapped[bool | None] = mapped_column(Boolean, nullable=True, index=True)
+    # предсказание: тип работ и уверенность модели; source = ml | manager
     work_type: Mapped[str | None] = mapped_column(String(32), nullable=True, index=True)
-    match_confidence: Mapped[float] = mapped_column(Float, default=0)
+    match_confidence: Mapped[float] = mapped_column(Float, default=0, index=True)
     match_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
+    # метка для обучения: rules — слабая разметка (ml/weak_labels.py), manager — подтверждение в админке
+    label_work_type: Mapped[str | None] = mapped_column(String(32), nullable=True)
+    label_source: Mapped[str | None] = mapped_column(String(16), nullable=True)
 
     category: Mapped[Category | None] = relationship(back_populates="products")

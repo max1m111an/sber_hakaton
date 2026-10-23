@@ -17,8 +17,9 @@ function WhyBox({ result }: { result: RoomEstimate }) {
             </ul>
             {notes.map(n => <p key={n} style={{ marginTop: 6 }}>{n}</p>)}
             <small>
-                Расход считается по нормативам расхода (таблица normative_rule) или по данным карточки товара;
-                цены — из выгрузки каталога maxidom.ru. Стоимость работ ориентировочная.
+                Товары для работ подбирает ML-модель (тип работ с уверенностью от 80% или подтверждённый менеджером);
+                расход — по нормативам (таблица normative_rule) или данным карточки, цены — из выгрузки maxidom.ru.
+                Стоимость работ ориентировочная.
             </small>
         </div>
     );
@@ -38,6 +39,8 @@ function MaterialCell({ line, onPick }: { line: EstimateLine; onPick: (id: numbe
                     {options.map(o => <option key={o.product_id} value={o.product_id}>{optionText(o, o.packages_needed, o.material_cost)}</option>)}
                 </select>
                 {line.manual ? <span className="tag">замена вручную</span> : <span className="tag top">выбор сервиса</span>}
+                {p.match_source === "manager" ? <span className="tag ok">тип подтверждён</span>
+                    : p.match_confidence ? <span className="tag" title="Уверенность ML-модели в типе работ товара">ML {Math.round(p.match_confidence * 100)}%</span> : null}
                 {p.moisture_resistant && <span className="tag wet">влагостойкий</span>}
             </div>
             <small className="num">

@@ -1,15 +1,13 @@
 import { useEffect, useState } from "react";
 import { getStats, isAbort, type Stats } from "@/api/client.ts";
-import { useWorkTypes } from "@/api/useWorkTypes.ts";
+import { useWorkTypes, workTypeName } from "@/api/useWorkTypes.ts";
 import { useProject } from "@/store/projectContext.ts";
 
-const F1: [string, number][] = [
-    ["Напольные покрытия", .89], ["Отделка стен", .86], ["Влагостойкие материалы", .84], ["Электрика", .78], ["Сопутствующее", .71],
-];
-
+const LOW_BUCKETS = ["<0.6", "0.6–0.8"];
 const pct = (a: number, b: number) => (b ? Math.round(a / b * 1000) / 10 : 0);
 const fmt = (n: number) => n.toLocaleString("ru-RU");
-const comma = (s: string) => s.replace(".", ",");
+const comma = (x: number, digits = 2) => x.toFixed(digits).replace(".", ",");
+const P = (x: number | null | undefined) => (x === null || x === undefined ? "—" : `${comma(x * 100, 1)}%`);
 
 export default function MetricsPage() {
     const { state } = useProject();
@@ -25,17 +23,21 @@ export default function MetricsPage() {
     }, []);
 
     const s = stats?.data;
+    const ml = s?.ml;
+    const h = ml?.holdout;
+    const pr = ml?.predictions;
     const manager = s?.by_source.manager ?? 0;
-    const byCategory = s?.by_source.category ?? 0;
-    const byName = s?.by_source.name ?? 0;
-    const top = [...types].filter(t => t.products > 0).sort((a, b) => b.products - a.products).slice(0, 8);
-    const maxTop = top[0]?.products ?? 1;
+    const perClass = Object.entries(ml?.per_class ?? {}).sort((a, b) => b[1].support - a[1].support);
+    const buckets = ml?.live?.confidence_buckets ?? [];
+    const maxBucket = Math.max(1, ...buckets.map(b => b.count));
+    const trainedAt = ml?.trained_at ? new Date(ml.trained_at * 1000).toLocaleString("ru-RU") : null;
 
     const kpis: [string, string, string][] = s ? [
-        [fmt(s.products), "товаров в каталоге", `${fmt(s.categories)} категорий из выгрузки`],
-        [fmt(s.classified), "товаров привязано к типам работ", `${comma(String(pct(s.classified - manager, s.classified)))}% — автоматически`],
-        [`${comma(String(pct(s.with_package, s.classified)))}%`, "размеченных товаров с распознанной фасовкой", "м², кг, л или длина упаковки"],
-        [fmt(manager), "подтверждено менеджером", state.log.length ? `${state.log.length} решений в этой сессии` : "разметка для обучения модели"],
+        [h ? comma(h.macro_f1) : "—", "macro F1 на отложенной выборке", h ? `${fmt(h.holdout_size)} товаров, цель MVP ≥ 0,80` : "модель ещё не обучена"],
+        [h ? P(h.precision_at_threshold) : "—", `точность при уверенности ≥ ${comma(ml!.threshold)}`,
+            h ? `полнота ${P(h.recall_at_threshold)}` : ""],
+        [fmt(s.classified), "товаров в подборе калькулятора", `${fmt(s.predicted)} отнесено моделью, ${fmt(manager)} — менеджером`],
+        [pr ? fmt(pr.new_beyond_rules) : "—", "уверенных находок сверх правил", "товары, которые правила по ключевым словам не нашли"],
     ] : [];
 
     return (
@@ -48,51 +50,59 @@ export default function MetricsPage() {
             </div>
             <div className="cols2" style={{ marginTop: 16 }}>
                 <div className="card">
-                    <h2>Разметка каталога по типам работ</h2>
-                    <p className="sub">Сколько товаров сервис отнёс к каждому типу работ</p>
+                    <h2>Качество матчинга по типам работ</h2>
+                    <p className="sub">F1 на отложенных 20% размеченной выборки (стратифицированно), цель MVP — 0,80</p>
                     <div style={{ marginTop: 12 }}>
-                        {top.map(t => (
-                            <div className="mrow" key={t.code}>
-                                <span>{t.name}</span>
-                                <div className="bar"><i style={{ width: t.products / maxTop * 100 + "%" }}></i></div>
-                                <b className="num">{fmt(t.products)}</b>
+                        {perClass.length ? perClass.map(([code, m]) => (
+                            <div className="mrow" key={code} title={`precision ${comma(m.precision)} · recall ${comma(m.recall)} · ${m.support} товаров`}>
+                                <span>{workTypeName(types, code)}</span>
+                                <div className="bar"><i className={m.f1 < 0.8 ? "m" : ""} style={{ width: m.f1 * 100 + "%" }}></i></div>
+                                <b className="num">{comma(m.f1)}</b>
+                            </div>
+                        )) : <p className="sub">Метрики появятся после обучения модели.</p>}
+                    </div>
+                </div>
+                <div className="card">
+                    <h2>Уверенность модели по каталогу</h2>
+                    <p className="sub">
+                        Товары, отнесённые моделью к типам работ. В подбор идут товары с уверенностью от {ml ? comma(ml.threshold, 1) : "0,8"}.
+                        {ml?.live?.mean_confidence !== null && ml?.live?.mean_confidence !== undefined && ` Средняя уверенность ${P(ml.live.mean_confidence)}.`}
+                    </p>
+                    <div style={{ marginTop: 12 }}>
+                        {buckets.map(b => (
+                            <div className="mrow" key={b.bucket}>
+                                <span>{b.bucket.replace(/\./g, ",")}</span>
+                                <div className="bar"><i className={LOW_BUCKETS.includes(b.bucket) ? "m" : ""} style={{ width: b.count / maxBucket * 100 + "%" }}></i></div>
+                                <b className="num">{fmt(b.count)}</b>
                             </div>
                         ))}
                     </div>
                 </div>
-                <div className="card">
-                    <h2>Источник разметки</h2>
-                    <p className="sub">По категории — уверенность 95%, по названию товара — 75%, менеджер — 100%</p>
-                    {s && (
-                        <div style={{ marginTop: 12 }}>
-                            {([["По категории", byCategory], ["По названию товара", byName], ["Менеджер", manager]] as [string, number][]).map(([n, v]) => (
-                                <div className="mrow" key={n}>
-                                    <span>{n}</span>
-                                    <div className="bar"><i className={n === "По названию товара" ? "m" : ""} style={{ width: pct(v, s.classified) + "%" }}></i></div>
-                                    <b className="num">{fmt(v)}</b>
-                                </div>
-                            ))}
-                            <p className="sub" style={{ marginTop: 10 }}>
-                                Нормативов расхода в базе: {s.rules}. Товары, размеченные по названию, стоит проверить в разделе «Разметка каталога».
-                            </p>
-                        </div>
-                    )}
-                </div>
             </div>
             <div className="card">
-                <h2>Целевые метрики ML-матчинга</h2>
-                <p className="sub">
-                    Демо-значения из макета: размеченной выборки для расчёта F1 пока нет, её наполняют подтверждения менеджера. Цель MVP — F1 ≥ 0,80.
+                <h2>Модель</h2>
+                {ml ? (
+                    <div className="cols2" style={{ marginTop: 10 }}>
+                        <dl className="specs" style={{ marginTop: 0 }}>
+                            <dt>Эмбеддинги</dt><dd>{ml.encoder}</dd>
+                            <dt>Классификатор</dt><dd>LogisticRegression (scikit-learn)</dd>
+                            <dt>Обучена</dt><dd>{trainedAt ?? (ml.status.state === "running" ? "идёт обучение…" : "ещё не обучалась")}</dd>
+                            <dt>Обучающая выборка</dt><dd className="num">{ml.train_size ? fmt(ml.train_size) : "—"}</dd>
+                            <dt>Accuracy (holdout)</dt><dd className="num">{h ? P(h.accuracy) : "—"}</dd>
+                        </dl>
+                        <dl className="specs" style={{ marginTop: 0 }}>
+                            <dt>Метки правил</dt><dd className="num">{fmt(ml.label_sources?.rules ?? 0)}</dd>
+                            <dt>Метки менеджера</dt><dd className="num">{fmt(ml.label_sources?.manager ?? 0)}{state.log.length ? ` (+${state.log.length} в этой сессии)` : ""}</dd>
+                            <dt>Класс «не работы»</dt><dd className="num">{fmt(ml.label_sources?.other_sampled ?? 0)} случайных товаров</dd>
+                            <dt>Совпадение с правилами</dt><dd className="num">{P(pr?.agreement_with_rules)}</dd>
+                            <dt>С фасовкой (в подборе)</dt><dd className="num">{s ? `${comma(pct(s.with_package, s.classified), 1)}%` : "—"}</dd>
+                        </dl>
+                    </div>
+                ) : <p className="sub">Загружаем…</p>}
+                <p className="sub" style={{ marginTop: 12 }}>
+                    Обучающая выборка собирается из слабой разметки правил по ключевым словам и решений менеджера в «Разметке каталога»;
+                    правила в подборе товаров не участвуют. Решения менеджера вытесняют правила при следующем обучении.
                 </p>
-                <div style={{ marginTop: 12 }}>
-                    {F1.map(([n, v]) => (
-                        <div className="mrow" key={n}>
-                            <span>{n}</span>
-                            <div className="bar"><i className={v < .8 ? "m" : ""} style={{ width: v * 100 + "%" }}></i></div>
-                            <b className="num">{comma(v.toFixed(2))}</b>
-                        </div>
-                    ))}
-                </div>
             </div>
         </section>
     );

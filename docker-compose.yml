@@ -18,12 +18,18 @@ services:
       # выгрузка каталога: при пустой БД загружается автоматически при старте
       PRODUCTS_FILE: /app/data/products_final.json
       AUTO_IMPORT: "true"
+      # ML-матчинг: обучается в фоне после импорта; в подбор идут товары с уверенностью ≥ порога
+      ML_AUTO_TRAIN: "true"
+      ML_CONFIDENCE_THRESHOLD: "0.8"
     depends_on:
       postgres:
         condition: service_healthy
     volumes:
       - ./apps/backend:/app/apps/backend
       - ./database:/app/database
+      - ./ml:/app/ml
+      # обученный классификатор и кеш эмбеддингов переживают пересборку контейнера
+      - ml_artifacts:/app/ml_artifacts
       - ./products_final.json:/app/data/products_final.json:ro
     networks:
       - app_network
@@ -159,4 +165,5 @@ networks:
 
 volumes:
   pgdata:
+  ml_artifacts:
   qdrant_storage:

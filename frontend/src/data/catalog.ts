@@ -78,8 +78,9 @@ export const SURFACE_OF: Record<string, "floor" | "wall" | "perimeter"> = {
     wall_putty: "wall", ceiling_molding: "perimeter", waterproofing_tape: "perimeter",
 };
 
-/** Порог уверенности матчинга, ниже которого товар уходит на ручную проверку. */
-export const CONFIDENCE_THRESHOLD = 0.85;
+/** Порог уверенности ML-модели: ниже него товар не участвует в подборе и уходит на ручную проверку.
+ *  Совпадает с ML_CONFIDENCE_THRESHOLD на backend (фактическое значение приходит в ответах API). */
+export const CONFIDENCE_THRESHOLD = 0.8;
 
 /** Примерный периметр и площадь стен — пока смета не пришла с сервера. */
 export const per = (r: Room) => 4 * Math.sqrt(Math.max(r.a, 0.5));

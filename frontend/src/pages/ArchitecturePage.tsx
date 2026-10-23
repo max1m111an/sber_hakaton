@@ -3,7 +3,8 @@ const ENDPOINTS: { m: string; path: string; d: string; plan?: boolean }[] = [
     { m: "POST", path: "/api/v1/calc/general", d: "Общий калькулятор: тип объекта и вариант ремонта → смета и список покупок" },
     { m: "POST", path: "/api/v1/calc/room", d: "Калькулятор комнаты: влажность, назначение, уровень ремонта" },
     { m: "POST", path: "/api/v1/product/{id}/calc", d: "Расчёт количества под размеры на карточке" },
-    { m: "POST", path: "/api/v1/match", d: "Тип работ и помещения для товара каталога" },
+    { m: "POST", path: "/api/v1/match", d: "ML-матчинг: тип работ и уверенность модели для товара" },
+    { m: "POST", path: "/api/v1/ml/train", d: "Переобучение модели на разметке менеджера" },
     { m: "GET", path: "/api/catalog/categories/tree", d: "Дерево категорий каталога" },
     { m: "GET", path: "/api/catalog/products", d: "Товары с фильтрами и пагинацией" },
     { m: "GET", path: "/api/catalog/products/{id}", d: "Полная карточка товара с характеристиками" },
@@ -11,7 +12,7 @@ const ENDPOINTS: { m: string; path: string; d: string; plan?: boolean }[] = [
     { m: "POST", path: "/api/v1/parse", d: "Параметры ремонта из текстового запроса", plan: true },
 ];
 
-const STACK = ["FastAPI", "Docker", "PostgreSQL", "Qdrant", "Redis", "sentence-transformers", "CatBoost", "React"];
+const STACK = ["FastAPI", "Docker", "PostgreSQL", "Qdrant", "Redis", "sentence-transformers", "scikit-learn", "React"];
 const SERVER = ["Core i7-14700K", "RTX 3090, 24 ГБ", "32 ГБ ОЗУ", "NVMe 1 ТБ"];
 const MVP_YES = ["Общий калькулятор", "Расчёт на карточке", "Матчинг каталога", "Специфика помещения", "Пояснения RAG", "Админка", "Разбор запроса"];
 const MVP_NO = ["Распознавание планов", "Продакшн-нагрузка"];

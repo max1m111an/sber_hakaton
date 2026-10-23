@@ -40,31 +40,48 @@ async def get_db():
         yield session
 
 
-def _outdated_tables(sync_conn) -> list[str]:
-    """Таблицы, чьи колонки в БД не совпадают с моделями (схема поменялась)."""
+def _sync_schema(sync_conn) -> list[str]:
+    """Приводит существующие таблицы к моделям.
+
+    Новые колонки добавляются через ALTER TABLE (данные сохраняются). Если колонки
+    удалены или переименованы, возвращает такие таблицы — их придётся пересоздать.
+    """
     insp = inspect(sync_conn)
     outdated = []
     for table in Base.metadata.sorted_tables:
         if not insp.has_table(table.name):
             continue
         existing = {c["name"] for c in insp.get_columns(table.name)}
-        if existing != set(table.columns.keys()):
+        if existing - set(table.columns.keys()):
             outdated.append(table.name)
+            continue
+        for col in table.columns:
+            if col.name in existing:
+                continue
+            if not col.nullable and col.default is None and col.server_default is None:
+                outdated.append(table.name)
+                break
+            ddl_type = col.type.compile(dialect=sync_conn.dialect)
+            default = ""
+            if col.default is not None and getattr(col.default, "is_scalar", False):
+                default = f" DEFAULT {col.default.arg!r}"
+            sync_conn.exec_driver_sql(f'ALTER TABLE "{table.name}" ADD COLUMN "{col.name}" {ddl_type}{default}')
+            logger.info("Схема БД: добавлена колонка %s.%s", table.name, col.name)
     return outdated
 
 
 async def init_db(retries: int = 30, delay: float = 2.0) -> None:
     """Создаёт таблицы. Ждёт, пока Postgres поднимется (в docker он стартует дольше API).
 
-    Миграций в проекте нет: если модели изменились, таблицы пересоздаются
-    (данные каталога затем заново загружаются импортом).
+    Миграций в проекте нет: новые колонки добавляются автоматически, а если
+    колонки удалены — таблицы пересоздаются (каталог затем загружается импортом).
     """
     from database import models  # noqa: F401  — регистрирует модели в Base.metadata
 
     for attempt in range(1, retries + 1):
         try:
             async with engine.begin() as conn:
-                outdated = await conn.run_sync(_outdated_tables)
+                outdated = await conn.run_sync(_sync_schema)
                 if outdated:
                     logger.warning("Схема БД устарела (%s) — таблицы будут пересозданы", ", ".join(outdated))
                     await conn.run_sync(Base.metadata.drop_all)

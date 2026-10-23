@@ -13,7 +13,7 @@ from decimal import ROUND_HALF_UP, Decimal
 from statistics import median
 from typing import Any, Iterable, Sequence
 
-from database.classifier import WORK_TYPES
+from database.work_types import WORK_TYPES
 
 COSMETIC, CAPITAL, DESIGNER = "косметический", "капитальный", "дизайнерский"
 LEVELS = (COSMETIC, CAPITAL, DESIGNER)
@@ -319,6 +319,11 @@ def explain(item: RoomItem, room: str, humidity: int, tier: str) -> str:
     if cov.rate:
         parts.append(f"расход {_fmt(cov.rate)} {'кг' if item.rule.calc_basis == 'weight' else 'л'}/м² ({cov.rate_source})")
     parts.append(f"запас {_fmt(float(item.rule.waste_percent or 0))}%")
+    p = item.choice.product
+    if getattr(p, "match_source", None) == "manager":
+        parts.append("тип работ подтверждён менеджером")
+    elif getattr(p, "match_confidence", None):
+        parts.append(f"тип работ определён ML-моделью с уверенностью {round(p.match_confidence * 100)}%")
     return f"{room}, влажность {HUMIDITY_NAMES[humidity]}: " + ", ".join(parts) + f"; выбрано из {item.candidates} товаров."
 
 

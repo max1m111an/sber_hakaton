@@ -74,6 +74,8 @@ class ProductBrief(BaseModel):
     coverage_per_package: float = Field(..., description="Сколько м² (или п.м.) закрывает одна упаковка")
     coverage_unit: str
     moisture_resistant: bool | None = None
+    match_confidence: float | None = Field(default=None, description="Уверенность ML-модели в типе работ товара")
+    match_source: str | None = Field(default=None, description="ml | manager")
 
 
 class Alternative(ProductBrief):
@@ -201,11 +203,21 @@ class MatchRequest(BaseModel):
     characteristics: list[dict[str, Any]] = []
 
 
+class MatchAlternative(BaseModel):
+    work_type: str | None
+    work_type_name: str
+    confidence: float
+
+
 class MatchResponse(BaseModel):
+    work_type_id: int = Field(..., description="id типа работ (0 — товар не относится к работам)")
     work_type: str | None
     work_type_name: str | None
-    confidence: float
+    confidence: float = Field(..., description="Вероятность предсказанного класса")
+    accepted: bool = Field(..., description="Уверенность выше порога — товар участвует в подборе")
+    threshold: float
     source: str
+    alternatives: list[MatchAlternative] = []
     moisture_resistant: bool | None
     suitable_rooms: list[str]
     package_area: float | None = None
@@ -221,7 +233,11 @@ class MatchedProduct(BaseModel):
     work_type: str | None
     work_type_name: str | None
     confidence: float
-    source: str | None
+    source: str | None = Field(..., description="ml — предсказание модели, manager — решение менеджера")
+    accepted: bool
+    label_work_type: str | None = Field(None, description="Метка обучающей выборки (rules / manager)")
+    label_source: str | None = None
+    agrees_with_label: bool | None = None
     moisture_resistant: bool | None
     suitable_rooms: list[str]
     price: Money
@@ -232,12 +248,15 @@ class MatchedProductList(BaseModel):
     total: int
     page: int
     per_page: int
+    threshold: float
 
 
 class WorkTypeOut(BaseModel):
+    id: int
     code: str
     name: str
-    products: int
+    products: int = Field(..., description="Товаров, принятых в подбор (уверенность ≥ порога или менеджер)")
+    predicted: int = Field(..., description="Всего товаров, отнесённых моделью к типу")
 
 
 class RuleOut(BaseModel):
@@ -263,7 +282,8 @@ class RuleOut(BaseModel):
 
 
 class MatchUpdate(BaseModel):
-    work_type: str | None = Field(default=None, description="Новый тип работ; без поля — подтвердить текущий")
+    work_type: str | None = Field(default=None,
+                                  description="Новый тип работ или 'other' (не относится к работам); без поля — подтвердить")
 
 
 class ConfirmRequest(BaseModel):
@@ -288,8 +308,10 @@ class ConfirmResponse(BaseModel):
 class StatsResponse(BaseModel):
     products: int
     categories: int
-    classified: int
-    with_package: int = Field(..., description="Размеченные товары с распознанной фасовкой")
+    classified: int = Field(..., description="Товары, принятые в подбор: уверенность модели ≥ порога или менеджер")
+    predicted: int = Field(..., description="Товары, которые модель отнесла к какому-либо типу работ")
+    with_package: int = Field(..., description="Принятые товары с распознанной фасовкой")
     by_source: dict[str, int]
     rules: int
     import_state: str | None = None
+    ml: dict[str, Any] = Field(default={}, description="Модель: энкодер, порог, метрики на отложенной выборке, распределение уверенности")

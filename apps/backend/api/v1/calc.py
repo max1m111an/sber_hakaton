@@ -11,7 +11,7 @@ from types import SimpleNamespace
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import load_only
 
@@ -27,6 +27,7 @@ from apps.backend.schemas.calculator import (
 from apps.backend.services import estimate as est
 from database import get_db
 from database.models import NormativeRule, Product
+from ml.matching import CONFIDENCE_THRESHOLD
 
 router = APIRouter(prefix="/api/v1", tags=["calculator"])
 
@@ -35,6 +36,9 @@ SessionDep = Annotated[AsyncSession, Depends(get_db)]
 LABOR_NOTE = "Стоимость работ ориентировочная: расценки задаются в таблице normative_rule."
 DATA_NOTE = ("Цены — result_price из выгрузки каталога; остатков и региональных цен в выгрузке нет, "
              "наличие не проверяется.")
+ML_NOTE = (f"Товары для работ подобраны ML-моделью: учитываются позиции с уверенностью ≥ {CONFIDENCE_THRESHOLD:g} "
+           "или подтверждённые менеджером.")
+ML_PENDING_NOTE = "ML-модель ещё размечает каталог — подбор товаров появится после обучения (статус: /api/v1/health)."
 ELECTRIC_NOTE = "Электромонтажные материалы (кабель, механизмы розеток) в выгрузке отсутствуют и в смету не входят."
 
 _CALC_COLUMNS = (
@@ -42,6 +46,7 @@ _CALC_COLUMNS = (
     Product.unit, Product.package_area, Product.quantity_in_package, Product.package_weight_kg,
     Product.package_volume_l, Product.package_length_m, Product.consumption_rate,
     Product.moisture_resistant, Product.work_type, Product.price_per_m2,
+    Product.match_confidence, Product.match_source,
 )
 
 
@@ -53,11 +58,16 @@ async def _rules(session: AsyncSession) -> list[NormativeRule]:
 
 
 async def _products_for(session: AsyncSession, rules: list[NormativeRule]) -> dict[str, list[Product]]:
+    """Кандидаты для работ: тип работ — предсказание ML-модели (ml/matching.py).
+
+    Берутся только уверенные предсказания (confidence ≥ порога) и решения менеджера.
+    """
     work_types = sorted({wt for r in rules for wt in (r.recommended_materials or [])})
     rows = (
         await session.execute(
             select(Product).options(load_only(*_CALC_COLUMNS))
-            .where(Product.work_type.in_(work_types), Product.status.is_(True), Product.result_price > 0)
+            .where(Product.work_type.in_(work_types), Product.status.is_(True), Product.result_price > 0,
+                   or_(Product.match_confidence >= CONFIDENCE_THRESHOLD, Product.match_source == "manager"))
         )
     ).scalars().all()
     by_type: dict[str, list[Product]] = defaultdict(list)
@@ -71,6 +81,7 @@ def _brief(line: est.Line) -> dict[str, Any]:
     return {
         "product_id": p.id, "sku": p.sku, "name": p.name, "url_key": p.url_key, "price": p.result_price,
         "currency": p.currency, "unit": p.unit, "pack": line.cover.pack_label,
+        "match_confidence": p.match_confidence, "match_source": p.match_source,
         "coverage_per_package": round(line.cover.per_package, 3), "coverage_unit": line.cover.unit,
         "moisture_resistant": p.moisture_resistant,
     }
@@ -116,7 +127,7 @@ def _room_result(room_in: RoomInput, level: str, tier_in: str | None, rules: lis
     active = [ln for ln in lines if ln["enabled"]]
     materials = sum((ln["material_cost"] for ln in active), Decimal("0"))
     labor = sum((ln["labor_cost"] for ln in active), Decimal("0"))
-    notes = [LABOR_NOTE, DATA_NOTE]
+    notes = [ML_NOTE if any(products.values()) else ML_PENDING_NOTE, LABOR_NOTE, DATA_NOTE]
     notes += [f"{it.rule.title}: {it.pick_rejected}." for it in items if it.pick_rejected]
     if not items:
         notes.append("Для этого сочетания помещения и уровня ремонта нет нормативов.")

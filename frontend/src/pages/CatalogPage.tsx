@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ROOMT, ROOM_TYPES } from "@/data/catalog.ts";
+import { CONFIDENCE_THRESHOLD, ROOMT, ROOM_TYPES } from "@/data/catalog.ts";
 import { isAbort, listProducts, type CatalogProduct, type ProductList, type ProductListParams } from "@/api/client.ts";
 import { useWorkTypes, workTypeName } from "@/api/useWorkTypes.ts";
 import { packLabel } from "@/lib/estimate.ts";
@@ -75,8 +75,8 @@ export default function CatalogPage() {
             <div className="card">
                 <h2>Каталог с подбором под помещение</h2>
                 <p className="sub">
-                    Товары maxidom.ru из выгрузки. Тип работ и влагостойкость определены матчингом по категории,
-                    названию и характеристикам. «В смету» подставляет товар в помещение «{room.n}».
+                    Товары maxidom.ru из выгрузки. Тип работ определяет ML-модель по названию, описанию и характеристикам;
+                    в смету идут товары с уверенностью от {Math.round(CONFIDENCE_THRESHOLD * 100)}%. «В смету» подставляет товар в помещение «{room.n}».
                 </p>
                 <div className="filters" style={{ marginTop: 14 }}>
                     <div>
@@ -87,7 +87,7 @@ export default function CatalogPage() {
                         <label className="lab" style={{ marginTop: 0 }} htmlFor="cc">Тип работ</label>
                         <select id="cc" value={f.workType} onChange={e => set({ workType: e.target.value })}>
                             <option value="">Все товары</option>
-                            {types.filter(t => t.products > 0).map(t => <option key={t.code} value={t.code}>{t.name} ({t.products})</option>)}
+                            {types.filter(t => t.predicted > 0).map(t => <option key={t.code} value={t.code}>{t.name} ({t.predicted})</option>)}
                         </select>
                     </div>
                     <div>
@@ -114,7 +114,7 @@ export default function CatalogPage() {
                         <thead>
                             <tr>
                                 <th style={{ width: "40%" }}>Товар</th><th>Тип работ</th><th className="r">Цена</th>
-                                <th className="r">Фасовка</th><th>Соответствие</th><th></th>
+                                <th className="r">Фасовка</th><th>Уверенность модели</th><th></th>
                             </tr>
                         </thead>
                         <tbody>
@@ -139,7 +139,7 @@ export default function CatalogPage() {
                                         <td>
                                             {p.work_type ? (
                                                 <div className="score">
-                                                    <div className="bar"><i className={v < 85 ? "m" : ""} style={{ width: v + "%" }}></i></div>
+                                                    <div className="bar"><i className={v < CONFIDENCE_THRESHOLD * 100 ? "m" : ""} style={{ width: v + "%" }}></i></div>
                                                     <span className="num">{v}%</span>
                                                 </div>
                                             ) : "—"}

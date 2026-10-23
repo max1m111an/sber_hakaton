@@ -15,6 +15,9 @@ function statusText(s: ApiStatus): string {
     const imp = s.health.import;
     if (imp.state === "running") return `импорт каталога: ${(imp.processed ?? 0).toLocaleString("ru-RU")}`;
     if (imp.state === "error") return "ошибка импорта";
+    const ml = s.health.ml;
+    if (ml && ["running", "queued"].includes(ml.state)) return "обучение ML-модели…";
+    if (ml?.state === "error") return "ошибка обучения модели";
     return `онлайн · ${(s.health.products ?? 0).toLocaleString("ru-RU")} товаров`;
 }
 
@@ -29,7 +32,8 @@ export default function AppLayout() {
     const data = estimate.data;
     const delivery = deliveryCost(data?.materials_cost ?? 0);
     const total = data ? data.total_cost + delivery : 0;
-    const importing = api.kind === "online" && api.health.import.state === "running";
+    const importing = api.kind === "online" && (api.health.import.state === "running"
+        || ["running", "queued"].includes(api.health.ml?.state ?? ""));
 
     // Статус сервиса; пока идёт импорт каталога — опрашиваем чаще
     useEffect(() => {
@@ -39,7 +43,8 @@ export default function AppLayout() {
             getHealth(ctrl.signal)
                 .then(health => {
                     setApi({ kind: "online", health });
-                    timer = window.setTimeout(poll, health.import.state === "running" ? 3000 : 30000);
+                    const busy = health.import.state === "running" || ["running", "queued"].includes(health.ml?.state ?? "");
+                    timer = window.setTimeout(poll, busy ? 3000 : 30000);
                 })
                 .catch((e: unknown) => {
                     if (isAbort(e)) return;
