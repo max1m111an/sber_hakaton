@@ -1,19 +1,24 @@
 import { HUM, LVL, per, wallA, type Humidity, type RepairLevel, type Room } from "@/data/catalog.ts";
+import type { RoomEstimate } from "@/api/client.ts";
 import { d1, num } from "@/lib/format.ts";
 import { useProject } from "@/store/projectContext.ts";
 
-export default function RoomParams({ room }: { room: Room }) {
+export default function RoomParams({ room, result }: { room: Room; result: RoomEstimate | null }) {
     const { state, update, updateRoom } = useProject();
 
     const setNum = (k: "a" | "ch" | "op") => (v: string) =>
         updateRoom(r => ({ ...r, [k]: Math.max(0, num(v)) }));
+
+    // геометрию считает сервис; до ответа показываем оценку
+    const walls = result?.geometry.wall_area ?? wallA(room);
+    const perimeter = result?.geometry.perimeter ?? per(room);
 
     return (
         <div className="card">
             <div className="rhead">
                 <div>
                     <h2>{room.n}</h2>
-                    <p className="sub">Стены {d1(wallA(room))} м² · периметр {d1(per(room))} м · влажность {HUM[room.hum]}</p>
+                    <p className="sub">Стены {d1(walls)} м² · периметр {d1(perimeter)} м · влажность {HUM[room.hum]}</p>
                 </div>
                 <div className="seg lvlseg">
                     {LVL.map((l, i) => (
@@ -42,7 +47,7 @@ export default function RoomParams({ room }: { room: Room }) {
                 <div>
                     <label className="lab" style={{ marginTop: 0 }} htmlFor="pw">Влажность</label>
                     <select id="pw" value={room.hum}
-                        onChange={e => updateRoom(r => ({ ...r, hum: +e.target.value as Humidity, pick: {} }))}>
+                        onChange={e => updateRoom(r => ({ ...r, hum: +e.target.value as Humidity, picks: {} }))}>
                         <option value={0}>Низкая</option>
                         <option value={1}>Средняя</option>
                         <option value={2}>Высокая</option>

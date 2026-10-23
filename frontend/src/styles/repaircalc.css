@@ -169,3 +169,4 @@ pre b{color:#FFC08A;font-weight:600}
 .lvlseg{min-width:300px}
 .app>div{min-width:0}
 @media(max-width:820px){.topbar{flex-wrap:wrap}.rail nav a{white-space:nowrap}.lvlseg{min-width:0;width:100%}.work>*{min-width:0}table{display:block;overflow-x:auto}}
+.pick select{max-width:100%;flex:1 1 260px;min-width:0}

@@ -1,5 +1,6 @@
 import { createContext, useContext } from "react";
-import type { AdminItem, RepairLevel, Room, Tier } from "@/data/catalog.ts";
+import type { RepairLevel, Room, Tier } from "@/data/catalog.ts";
+import type { GeneralEstimate } from "@/api/client.ts";
 
 export interface CartItem {
     t: string;
@@ -20,8 +21,13 @@ export interface ProjectState {
     tier: Tier;
     cart: CartItem[];
     budget: number;
-    admin: AdminItem[];
     log: LogItem[];
+}
+
+export interface EstimateState {
+    data: GeneralEstimate | null;
+    loading: boolean;
+    error: string | null;
 }
 
 export interface ProjectApi {
@@ -30,6 +36,8 @@ export interface ProjectApi {
     update: (fn: (s: ProjectState) => ProjectState) => void;
     /** Изменить выбранное помещение */
     updateRoom: (fn: (r: Room) => Room) => void;
+    /** Смета с сервера (POST /api/v1/calc/general) */
+    estimate: EstimateState;
 }
 
 export const ProjectContext = createContext<ProjectApi | null>(null);

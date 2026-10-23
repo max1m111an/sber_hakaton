@@ -40,16 +40,24 @@ docker compose exec fastapi python -m database.import_products /app/data/product
 | GET | `/api/catalog/products/{id}` | Полная карточка товара |
 | GET | `/api/regions` | Регионы (в выгрузке их нет — пустой список) |
 | POST | `/api/v1/calc/general` | Общий калькулятор: тип объекта + вариант ремонта (+ помещения) → смета и список покупок |
-| POST | `/api/v1/calc/room` | Калькулятор комнаты: тип, площадь, влажность, уровень ремонта |
+| POST | `/api/v1/calc/room` | Калькулятор комнаты: тип, площадь, влажность, уровень ремонта; `picks` — ручной выбор товара по коду работы, `disabled` — исключённые работы |
 | POST | `/api/v1/product/{id}/calc` | Сколько купить товара под размеры (`area` / `length`+`width` / `width`+`height`) |
 | POST | `/api/v1/match` | Тип работ, влагостойкость и помещения для нового товара |
 | GET | `/api/v1/match/products` | Разметка каталога с уверенностью (для админки) |
+| PATCH | `/api/v1/match/products/{id}` | Менеджер подтверждает или меняет тип работ |
+| POST | `/api/v1/match/confirm` | Массовое подтверждение (по `ids` или фильтру `min_confidence`, `work_type`, `q`) |
+| GET | `/api/v1/stats` | Сводка по каталогу и разметке |
 | GET | `/api/v1/work-types` | Типы работ и число товаров |
 | GET | `/api/v1/rules` | Нормативы расхода |
 | GET | `/api/v1/health` | Состояние БД и импорта |
 
 Нормативы расхода и ориентировочные расценки работ лежат в таблице `normative_rule`
 (начальные значения — `database/seed_rules.py`).
+
+## Фронтенд
+React-приложение (`frontend/`) работает на данных API: смета — `POST /api/v1/calc/general`,
+каталог — `/api/catalog/products`, карточка — `/api/catalog/products/{id}` и `/api/v1/product/{id}/calc`,
+разметка — `/api/v1/match/*`, метрики — `/api/v1/stats`. Для `npm run dev` API проксируется на `localhost:8080`.
 
 ## Установка зависимостей
 Работа с poetry:

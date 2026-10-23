@@ -20,6 +20,8 @@ class RoomInput(BaseModel):
     width: float | None = Field(default=None, gt=0, le=100)
     humidity_level: str | None = Field(default=None, examples=["высокая"], description="низкая / средняя / высокая")
     load_level: str | None = Field(default=None, examples=["средняя"])
+    picks: dict[str, int] = Field(default={}, description="Ручной выбор товара: {код правила: id товара}")
+    disabled: list[str] = Field(default=[], description="Коды правил (работ), исключённых из сметы")
 
 
 class RoomCalcRequest(RoomInput):
@@ -46,6 +48,8 @@ class ProductCalcRequest(BaseModel):
     height: float | None = Field(default=None, gt=0, le=20, description="Высота стены, м")
     openings_area: float = Field(default=0, ge=0, le=500, description="Вычесть окна и двери, м²")
     waste_percent: float | None = Field(default=None, ge=0, le=50, description="Запас; по умолчанию — из норматива")
+    extra_waste_percent: float = Field(default=0, ge=0, le=30,
+                                       description="Доп. запас к нормативу (укладка по диагонали +5%, рисунок +10%)")
     layers: int | None = Field(default=None, ge=1, le=5, description="Слоёв (краска, гидроизоляция)")
 
     @model_validator(mode="after")
@@ -82,6 +86,10 @@ class EstimateLine(BaseModel):
     title: str
     work_type: str
     work_type_name: str | None = None
+    recommended_materials: list[str] = []
+    enabled: bool = True
+    manual: bool = Field(default=False, description="Товар выбран пользователем")
+    pick_rejected: str | None = None
     surface: float
     surface_unit: str
     quantity_with_waste: float | None = None
@@ -252,3 +260,36 @@ class RuleOut(BaseModel):
     consumption_formula: str
     labor_price: Money
     labor_unit: str
+
+
+class MatchUpdate(BaseModel):
+    work_type: str | None = Field(default=None, description="Новый тип работ; без поля — подтвердить текущий")
+
+
+class ConfirmRequest(BaseModel):
+    """Какие товары подтвердить: список id и/или фильтр (уверенность, тип работ, поиск)."""
+
+    ids: list[int] | None = Field(default=None, max_length=500)
+    min_confidence: float | None = Field(default=None, ge=0, le=1)
+    work_type: str | None = None
+    q: str | None = None
+
+    @model_validator(mode="after")
+    def _has_filter(self):
+        if not self.ids and self.min_confidence is None:
+            raise ValueError("Укажите ids или min_confidence")
+        return self
+
+
+class ConfirmResponse(BaseModel):
+    confirmed: int
+
+
+class StatsResponse(BaseModel):
+    products: int
+    categories: int
+    classified: int
+    with_package: int = Field(..., description="Размеченные товары с распознанной фасовкой")
+    by_source: dict[str, int]
+    rules: int
+    import_state: str | None = None

@@ -83,7 +83,8 @@ def _room_result(room_in: RoomInput, level: str, tier_in: str | None, rules: lis
     tier = est.norm_tier(tier_in, level)
     height = room_in.ceiling_height or default_height
     geom = est.geometry(room_in.area, height, room_in.openings_area, room_in.length, room_in.width, room)
-    items = est.estimate_room(rules, products, room=room, level=level, humidity=humidity, geom=geom, tier=tier)
+    items = est.estimate_room(rules, products, room=room, level=level, humidity=humidity, geom=geom, tier=tier,
+                              picks=room_in.picks, disabled=room_in.disabled)
 
     lines = []
     for it in items:
@@ -93,6 +94,10 @@ def _room_result(room_in: RoomInput, level: str, tier_in: str | None, rules: lis
             "title": it.rule.title,
             "work_type": it.rule.work_type,
             "work_type_name": est.work_type_name(it.rule.work_type),
+            "recommended_materials": list(it.rule.recommended_materials or []),
+            "enabled": it.enabled,
+            "manual": it.manual,
+            "pick_rejected": it.pick_rejected,
             "surface": it.surface,
             "surface_unit": it.surface_unit,
             "quantity_with_waste": c.need if c else None,
@@ -108,9 +113,11 @@ def _room_result(room_in: RoomInput, level: str, tier_in: str | None, rules: lis
             "alternatives": [{**_brief(a), "packages_needed": a.packages, "material_cost": a.cost}
                              for a in it.alternatives],
         })
-    materials = sum((ln["material_cost"] for ln in lines), Decimal("0"))
-    labor = sum((ln["labor_cost"] for ln in lines), Decimal("0"))
+    active = [ln for ln in lines if ln["enabled"]]
+    materials = sum((ln["material_cost"] for ln in active), Decimal("0"))
+    labor = sum((ln["labor_cost"] for ln in active), Decimal("0"))
     notes = [LABOR_NOTE, DATA_NOTE]
+    notes += [f"{it.rule.title}: {it.pick_rejected}." for it in items if it.pick_rejected]
     if not items:
         notes.append("Для этого сочетания помещения и уровня ремонта нет нормативов.")
     missing = [ln["title"] for ln in lines if ln["product"] is None]
@@ -183,7 +190,7 @@ async def general_calculator(payload: GeneralCalcRequest, session: SessionDep):
     where: dict[int, list[str]] = defaultdict(list)
     for room in rooms:
         for it in room.pop("_lines"):
-            if it.choice:
+            if it.choice and it.enabled:
                 pid = it.choice.product.id
                 need[pid] += it.choice.need / it.choice.cover.per_package
                 info[pid] = it.choice
@@ -254,7 +261,8 @@ async def product_calculator(product_id: int, payload: ProductCalcRequest, sessi
     calc_rule = SimpleNamespace(
         calc_basis=basis, consumption_rate=rate,
         layers=payload.layers or layers or 1,
-        waste_percent=payload.waste_percent if payload.waste_percent is not None else waste,
+        waste_percent=(payload.waste_percent if payload.waste_percent is not None else waste)
+        + payload.extra_waste_percent,
     )
     line = est.make_line(product, calc_rule, surface)
     if line is None:

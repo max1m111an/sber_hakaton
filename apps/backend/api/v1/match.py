@@ -2,18 +2,26 @@
 
     POST /api/v1/match            — классифицировать произвольный товар (новая позиция каталога)
     GET  /api/v1/match/products   — товары каталога с предложенным типом работ и уверенностью
+    PATCH /api/v1/match/products/{id} — менеджер подтверждает или меняет тип работ
+    POST /api/v1/match/confirm    — массовое подтверждение
+    GET  /api/v1/stats            — сводка по каталогу и разметке
     GET  /api/v1/work-types       — типы работ и число товаров
     GET  /api/v1/rules            — нормативы расхода
     GET  /api/v1/health           — состояние сервиса, БД и импорта
 """
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
-from sqlalchemy import func, select
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from apps.backend.schemas.calculator import (
+    ConfirmRequest,
+    ConfirmResponse,
+    MatchedProduct,
     MatchedProductList,
+    MatchUpdate,
+    StatsResponse,
     MatchRequest,
     MatchResponse,
     RuleOut,
@@ -23,7 +31,7 @@ from database import get_db
 from database.catalog_parser import parse_pack
 from database.classifier import WORK_TYPES, classify, detect_moisture, suitable_rooms
 from database.import_products import IMPORT_STATUS
-from database.models import NormativeRule, Product
+from database.models import Category, NormativeRule, Product
 
 router = APIRouter(prefix="/api/v1", tags=["matching"])
 
@@ -73,17 +81,69 @@ async def matched_products(
             .offset((page - 1) * per_page).limit(per_page)
         )
     ).scalars().all()
+    return {"items": [_matched(p) for p in rows], "total": total, "page": page, "per_page": per_page}
+
+
+def _matched(p: Product) -> dict:
+    return {"id": p.id, "name": p.name, "category_id": p.category_id, "work_type": p.work_type,
+            "work_type_name": WORK_TYPES.get(p.work_type or ""), "confidence": p.match_confidence,
+            "source": p.match_source, "moisture_resistant": p.moisture_resistant,
+            "suitable_rooms": suitable_rooms(p.work_type, p.moisture_resistant), "price": p.result_price}
+
+
+@router.patch("/match/products/{product_id}", response_model=MatchedProduct, summary="Подтвердить / изменить тип работ")
+async def update_match(product_id: int, payload: MatchUpdate, session: SessionDep):
+    product = await session.get(Product, product_id)
+    if product is None:
+        raise HTTPException(status_code=404, detail="Товар не найден")
+    if payload.work_type is not None:
+        if payload.work_type not in WORK_TYPES:
+            raise HTTPException(status_code=422, detail="Неизвестный тип работ")
+        product.work_type = payload.work_type
+    product.match_confidence = 1.0
+    product.match_source = "manager"   # подтверждения менеджера — разметка для обучения модели
+    await session.commit()
+    return _matched(product)
+
+
+@router.post("/match/confirm", response_model=ConfirmResponse, summary="Массовое подтверждение разметки")
+async def confirm_matches(payload: ConfirmRequest, session: SessionDep):
+    conditions = [Product.work_type.is_not(None), Product.match_source.is_distinct_from("manager")]
+    if payload.ids:
+        conditions.append(Product.id.in_(payload.ids))
+    if payload.min_confidence is not None:
+        conditions.append(Product.match_confidence >= payload.min_confidence)
+    if payload.work_type:
+        conditions.append(Product.work_type == payload.work_type)
+    if payload.q:
+        conditions.append(Product.name.ilike(f"%{payload.q}%"))
+    result = await session.execute(
+        update(Product).where(*conditions).values(match_confidence=1.0, match_source="manager")
+    )
+    await session.commit()
+    return {"confirmed": result.rowcount or 0}
+
+
+@router.get("/stats", response_model=StatsResponse, summary="Сводка по каталогу и разметке")
+async def stats(session: SessionDep):
+    async def count(*where) -> int:
+        stmt = select(func.count()).select_from(Product)
+        if where:
+            stmt = stmt.where(*where)
+        return int((await session.execute(stmt)).scalar_one())
+
+    by_source = dict((await session.execute(
+        select(func.coalesce(Product.match_source, "none"), func.count()).group_by(Product.match_source)
+    )).all())
     return {
-        "items": [
-            {"id": p.id, "name": p.name, "category_id": p.category_id, "work_type": p.work_type,
-             "work_type_name": WORK_TYPES.get(p.work_type or ""), "confidence": p.match_confidence,
-             "source": p.match_source, "moisture_resistant": p.moisture_resistant,
-             "suitable_rooms": suitable_rooms(p.work_type, p.moisture_resistant), "price": p.result_price}
-            for p in rows
-        ],
-        "total": total,
-        "page": page,
-        "per_page": per_page,
+        "products": await count(),
+        "categories": int((await session.execute(select(func.count()).select_from(Category))).scalar_one()),
+        "classified": await count(Product.work_type.is_not(None)),
+        "with_package": await count(Product.work_type.is_not(None), or_(Product.package_area.is_not(None), Product.package_weight_kg.is_not(None),
+                                        Product.package_volume_l.is_not(None), Product.package_length_m.is_not(None))),
+        "by_source": {str(k): int(v) for k, v in by_source.items()},
+        "rules": int((await session.execute(select(func.count()).select_from(NormativeRule))).scalar_one()),
+        "import_state": IMPORT_STATUS.get("state"),
     }
 
 

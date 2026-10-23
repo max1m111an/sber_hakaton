@@ -93,19 +93,19 @@ class ProductListItem(BaseModel):
     # поля RepairCalc
     work_type: str | None = None
     moisture_resistant: bool | None = None
+    package_weight_kg: float | None = None
+    package_volume_l: float | None = None
+    package_length_m: float | None = None
+    match_confidence: float = 0
+    match_source: str | None = None
 
 
 class ProductCard(ProductListItem):
     description: str | None = None
     weight: float | None = None
     characteristics: list[Characteristic] = []
-    package_weight_kg: float | None = None
-    package_volume_l: float | None = None
-    package_length_m: float | None = None
     pack_source: str | None = None
     consumption_rate: float | None = None
-    match_confidence: float = 0
-    match_source: str | None = None
 
 
 class ProductCardResponse(BaseModel):

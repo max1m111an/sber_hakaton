@@ -42,6 +42,11 @@ def product_item(p: Any, category: Any | None = None, with_tree: bool = False) -
         "propertiesBottom": [{"name": c.get("name"), "value": c.get("value")} for c in chars[:BOTTOM_PROPS]],
         "work_type": p.work_type,
         "moisture_resistant": p.moisture_resistant,
+        "package_weight_kg": p.package_weight_kg,
+        "package_volume_l": p.package_volume_l,
+        "package_length_m": p.package_length_m,
+        "match_confidence": p.match_confidence or 0,
+        "match_source": p.match_source,
     }
     if with_tree:
         item["categories_tree"] = category_path(category) if category is not None else []
@@ -56,13 +61,8 @@ def product_card(p: Any, category: Any | None = None) -> dict[str, Any]:
         weight=p.weight,
         characteristics=[{"code": c.get("code"), "name": c.get("name"), "value": c.get("value")}
                          for c in (p.characteristics or [])],
-        package_weight_kg=p.package_weight_kg,
-        package_volume_l=p.package_volume_l,
-        package_length_m=p.package_length_m,
         pack_source=p.pack_source,
         consumption_rate=p.consumption_rate,
-        match_confidence=p.match_confidence or 0,
-        match_source=p.match_source,
     )
     return card
 

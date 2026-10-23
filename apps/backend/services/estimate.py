@@ -244,12 +244,34 @@ class RoomItem:
     alternatives: list[Line] = field(default_factory=list)
     labor_cost: Decimal = Decimal("0")
     candidates: int = 0
+    enabled: bool = True          # работу можно отключить — тогда она не входит в итог
+    manual: bool = False          # товар выбран пользователем, а не сервисом
+    pick_rejected: str | None = None  # почему выбор пользователя не принят
+
+
+def _manual_line(pick_id: int, rule: Any, surface: float, humidity: int,
+                 products_by_type: dict[str, list[Any]]) -> tuple[Line | None, str | None]:
+    for wt in rule.recommended_materials or []:
+        for p in products_by_type.get(wt, []):
+            if p.id == pick_id:
+                if not suitable(p, rule, humidity):
+                    return None, f"«{p.name}» не подходит: нужен влагостойкий материал или товар исключён нормативом"
+                line = make_line(p, rule, surface)
+                return (line, None) if line else (None, f"У «{p.name}» неизвестна фасовка")
+    return None, "Выбранный товар не относится к этой работе"
 
 
 def estimate_room(rules: Iterable[Any], products_by_type: dict[str, list[Any]], *,
                   room: str, level: str, humidity: int, geom: Geometry, tier: str,
-                  alternatives: int = 3) -> list[RoomItem]:
-    """Смета одного помещения: подходящие правила → товары → упаковки и стоимость."""
+                  alternatives: int = 5, picks: dict[str, int] | None = None,
+                  disabled: Iterable[str] = ()) -> list[RoomItem]:
+    """Смета одного помещения: подходящие правила → товары → упаковки и стоимость.
+
+    picks — ручной выбор товара: {код правила: id товара};
+    disabled — коды правил (работ), которые пользователь отключил.
+    """
+    picks = picks or {}
+    off = set(disabled)
     applicable = sorted((r for r in rules if rule_applies(r, room, level, humidity)), key=lambda r: r.priority or 0)
     items: list[RoomItem] = []
     tiled = 0.0
@@ -264,12 +286,19 @@ def estimate_room(rules: Iterable[Any], products_by_type: dict[str, list[Any]], 
                 break
         lines = [ln for ln in (make_line(p, rule, surface) for p in pool) if ln]
         ranked = pick(lines, tier)
+        manual, rejected = False, None
+        if rule.code in picks:
+            line, rejected = _manual_line(picks[rule.code], rule, surface, humidity, products_by_type)
+            if line is not None:
+                ranked = [line] + [x for x in ranked if x.product.id != line.product.id]
+                manual = True
         unit = "п.м." if rule.surface == "perimeter" else "м²"
         labor = money(Decimal(str(surface)) * Decimal(rule.labor_price or 0) * LABOR_K[level])
         item = RoomItem(rule, round(surface, 3), unit, ranked[0] if ranked else None,
-                        ranked[1:1 + alternatives], labor, len(pool))
+                        ranked[1:1 + alternatives], labor, len(pool),
+                        enabled=rule.code not in off, manual=manual, pick_rejected=rejected)
         items.append(item)
-        if getattr(rule, "tiled", False) and item.choice:
+        if getattr(rule, "tiled", False) and item.choice and item.enabled:
             tiled += surface
     return items
 
@@ -278,6 +307,8 @@ def explain(item: RoomItem, room: str, humidity: int, tier: str) -> str:
     """Короткое пояснение выбора (до подключения RAG/LLM)."""
     if not item.choice:
         return "В каталоге нет подходящих товаров с известной фасовкой для этой работы."
+    if item.manual:
+        return f"Товар выбран вручную; выбор сервиса — среди альтернатив. Запас {_fmt(float(item.rule.waste_percent or 0))}%."
     parts = []
     if humidity >= 2 or item.rule.requires_moisture_resistant:
         parts.append("только влагостойкие материалы")

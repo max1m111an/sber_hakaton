@@ -1,70 +1,98 @@
-import { useState } from "react";
-import { CATN, ROOMT, ROOM_TYPES, SKU, WORK_KEYS, type Sku } from "@/data/catalog.ts";
-import { relevance } from "@/lib/estimate.ts";
+import { useEffect, useState } from "react";
+import { ROOMT, ROOM_TYPES } from "@/data/catalog.ts";
+import { isAbort, listProducts, type CatalogProduct, type ProductList, type ProductListParams } from "@/api/client.ts";
+import { useWorkTypes, workTypeName } from "@/api/useWorkTypes.ts";
+import { packLabel } from "@/lib/estimate.ts";
 import { rub } from "@/lib/format.ts";
 import { useProject } from "@/store/projectContext.ts";
 import { useToast } from "@/store/toastContext.ts";
 
 interface Filters {
     q: string;
-    c: string;
-    r: string;
+    workType: string;
+    room: string;
     wet: boolean;
-    stock: boolean;
+    sort: NonNullable<ProductListParams["sort"]>;
+    page: number;
 }
 
-const EMPTY: Filters = { q: "", c: "", r: "", wet: false, stock: false };
+const EMPTY: Filters = { q: "", workType: "", room: "", wet: false, sort: "id", page: 1 };
+const PER_PAGE = 20;
 
 export default function CatalogPage() {
-    const { state, update } = useProject();
+    const { state, update, estimate } = useProject();
     const toast = useToast();
+    const types = useWorkTypes();
     const [f, setF] = useState<Filters>(EMPTY);
-    const set = (p: Partial<Filters>) => setF(prev => ({ ...prev, ...p }));
+    const [res, setRes] = useState<{ key: string; data?: ProductList; error?: string } | null>(null);
+    const set = (p: Partial<Filters>) => setF(prev => ({ ...prev, page: 1, ...p }));
 
-    let list = SKU.filter(s => (!f.c || s.c === f.c) && (!f.wet || s.wet === 2) && (!f.stock || s.stock >= 50));
-    if (f.q) {
-        const q = f.q.toLowerCase();
-        list = list.filter(s => (s.n + " " + CATN[s.c]).toLowerCase().includes(q));
-    }
-    if (f.r) {
-        const h = ROOMT[f.r].h;
-        list = list.filter(s => s.wet >= h);
-    }
-    const rows = list.map(s => ({ s, v: relevance(s, f.q, f.r) })).sort((a, b) => b.v - a.v);
+    // для влажного помещения показываем только влагостойкие товары
+    const wetRoom = f.room ? ROOMT[f.room].h >= 2 : false;
+    const params: ProductListParams = {
+        q: f.q.trim() || undefined,
+        work_type: f.workType || undefined,
+        moisture_resistant: f.wet || wetRoom ? true : undefined,
+        sort: f.sort,
+        page: f.page,
+        per_page: PER_PAGE,
+    };
+    const key = JSON.stringify(params);
 
-    const use = (s: Sku) => {
-        const r = state.rooms[state.sel];
-        if (s.c === "aux") { toast("Сопутствующее добавляется автоматически"); return; }
-        if (s.wet < r.hum) { toast(`${s.n} не подходит для помещения «${r.n}»`); return; }
-        update(st => ({
-            ...st,
-            rooms: st.rooms.map((x, i) => i === st.sel
-                ? { ...x, pick: { ...x.pick, [s.c]: s.id }, off: { ...x.off, [s.c]: false } }
-                : x),
+    useEffect(() => {
+        const ctrl = new AbortController();
+        const timer = window.setTimeout(() => {
+            listProducts(JSON.parse(key) as ProductListParams, ctrl.signal)
+                .then(data => setRes({ key, data }))
+                .catch((e: unknown) => { if (!isAbort(e)) setRes({ key, error: e instanceof Error ? e.message : String(e) }); });
+        }, 250);
+        return () => { window.clearTimeout(timer); ctrl.abort(); };
+    }, [key]);
+
+    const data = res?.data;
+    const loading = res?.key !== key;
+    const room = state.rooms[state.sel];
+    const roomLines = estimate.data?.rooms.length === state.rooms.length ? estimate.data.rooms[state.sel]?.items ?? [] : [];
+    const lineFor = (p: CatalogProduct) => roomLines.find(l => p.work_type && l.recommended_materials.includes(p.work_type));
+
+    const use = (p: CatalogProduct) => {
+        const line = lineFor(p);
+        if (!line) {
+            toast(`В смете помещения «${room.n}» нет работы для этого товара`);
+            return;
+        }
+        update(s => ({
+            ...s,
+            rooms: s.rooms.map((r, i) => i === s.sel
+                ? { ...r, picks: { ...r.picks, [line.rule_code]: p.id }, disabled: r.disabled.filter(c => c !== line.rule_code) }
+                : r),
         }));
-        toast(`В смету помещения «${r.n}»: ${s.n}`);
+        toast(`«${line.title}» в помещении «${room.n}»: ${p.name}`);
     };
 
     return (
         <section>
             <div className="card">
                 <h2>Каталог с подбором под помещение</h2>
-                <p className="sub">Модель сопоставляет товары с типами работ и помещениями, поэтому фильтр понимает «для санузла» без ручной разметки.</p>
+                <p className="sub">
+                    Товары maxidom.ru из выгрузки. Тип работ и влагостойкость определены матчингом по категории,
+                    названию и характеристикам. «В смету» подставляет товар в помещение «{room.n}».
+                </p>
                 <div className="filters" style={{ marginTop: 14 }}>
                     <div>
                         <label className="lab" style={{ marginTop: 0 }} htmlFor="cq">Поиск по каталогу</label>
-                        <input id="cq" type="search" placeholder="плитка, гипсокартон, кабель…" value={f.q} onChange={e => set({ q: e.target.value })} />
+                        <input id="cq" type="search" placeholder="керамогранит, затирка, обои…" value={f.q} onChange={e => set({ q: e.target.value })} />
                     </div>
                     <div>
                         <label className="lab" style={{ marginTop: 0 }} htmlFor="cc">Тип работ</label>
-                        <select id="cc" value={f.c} onChange={e => set({ c: e.target.value })}>
-                            <option value="">Все работы</option>
-                            {WORK_KEYS.map(k => <option key={k} value={k}>{CATN[k]}</option>)}
+                        <select id="cc" value={f.workType} onChange={e => set({ workType: e.target.value })}>
+                            <option value="">Все товары</option>
+                            {types.filter(t => t.products > 0).map(t => <option key={t.code} value={t.code}>{t.name} ({t.products})</option>)}
                         </select>
                     </div>
                     <div>
                         <label className="lab" style={{ marginTop: 0 }} htmlFor="cr">Помещение</label>
-                        <select id="cr" value={f.r} onChange={e => set({ r: e.target.value })}>
+                        <select id="cr" value={f.room} onChange={e => set({ room: e.target.value })}>
                             <option value="">Любое помещение</option>
                             {ROOM_TYPES.map(k => <option key={k} value={k}>{k}</option>)}
                         </select>
@@ -73,45 +101,72 @@ export default function CatalogPage() {
                 </div>
                 <div className="chips">
                     <button aria-pressed={f.wet} onClick={() => set({ wet: !f.wet })}>Только влагостойкие</button>
-                    <button aria-pressed={f.stock} onClick={() => set({ stock: !f.stock })}>В наличии от 50</button>
+                    {([["id", "По умолчанию"], ["price_asc", "Сначала дешевле"], ["price_desc", "Сначала дороже"]] as const).map(([k, l]) => (
+                        <button key={k} aria-pressed={f.sort === k} onClick={() => set({ sort: k })}>{l}</button>
+                    ))}
                 </div>
             </div>
             <div className="card">
-                <table className="t-cat">
-                    <thead>
-                        <tr>
-                            <th style={{ width: "40%" }}>Товар</th><th>Тип работ</th><th className="r">Цена</th>
-                            <th className="r">Остаток</th><th>Соответствие</th><th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {rows.length ? rows.map(({ s, v }) => (
-                            <tr key={s.id}>
-                                <td>
-                                    <div className="prod">
-                                        <span className="thumb"></span>
-                                        <div><b style={{ fontWeight: 600 }}>{s.n}</b><small>Артикул {s.id} · {s.u}</small></div>
-                                    </div>
-                                </td>
-                                <td>{CATN[s.c]}{s.wet === 2 && <> <span className="tag wet">влага</span></>}</td>
-                                <td className="r num">{rub(s.p)}</td>
-                                <td className="r num">{s.stock >= 50 ? s.stock : <span className="tag w">{s.stock}</span>}</td>
-                                <td>
-                                    <div className="score">
-                                        <div className="bar"><i className={v < 60 ? "m" : ""} style={{ width: v + "%" }}></i></div>
-                                        <span className="num">{v}%</span>
-                                    </div>
-                                </td>
-                                <td className="r"><button className="btn g sm" onClick={() => use(s)}>В смету</button></td>
+                {res?.error && !loading ? (
+                    <p className="sub" style={{ color: "var(--brand)" }}>Каталог недоступен: {res.error}</p>
+                ) : (
+                    <table className="t-cat" style={{ opacity: loading ? 0.6 : 1 }}>
+                        <thead>
+                            <tr>
+                                <th style={{ width: "40%" }}>Товар</th><th>Тип работ</th><th className="r">Цена</th>
+                                <th className="r">Фасовка</th><th>Соответствие</th><th></th>
                             </tr>
-                        )) : (
-                            <tr><td colSpan={6} className="sub" style={{ padding: "18px 0" }}>Ничего не нашлось. Снимите часть фильтров.</td></tr>
-                        )}
-                    </tbody>
-                </table>
-                <p className="sub" style={{ marginTop: 12 }}>
-                    {rows.length} товаров · соответствие считает модель по названию, атрибутам и условиям помещения
-                </p>
+                        </thead>
+                        <tbody>
+                            {data?.items.length ? data.items.map(p => {
+                                const v = Math.round((p.match_confidence || 0) * 100);
+                                const canUse = Boolean(lineFor(p));
+                                return (
+                                    <tr key={p.id}>
+                                        <td>
+                                            <div className="prod">
+                                                <span className="thumb"></span>
+                                                <div>
+                                                    <b style={{ fontWeight: 600 }}>{p.name}</b>
+                                                    <small>Код {p.cod_good}{p.brand?.name ? ` · ${p.brand.name}` : ""} · {Object.values(p.categories)[0] ?? ""}</small>
+                                                </div>
+                                            </div>
+                                        </td>
+                                        <td>{p.work_type ? workTypeName(types, p.work_type) : <span className="sub">не размечен</span>}
+                                            {p.moisture_resistant && <> <span className="tag wet">влага</span></>}</td>
+                                        <td className="r num">{rub(p.result_price)}</td>
+                                        <td className="r num">{packLabel(p)}</td>
+                                        <td>
+                                            {p.work_type ? (
+                                                <div className="score">
+                                                    <div className="bar"><i className={v < 85 ? "m" : ""} style={{ width: v + "%" }}></i></div>
+                                                    <span className="num">{v}%</span>
+                                                </div>
+                                            ) : "—"}
+                                        </td>
+                                        <td className="r">
+                                            <button className="btn g sm" disabled={!canUse} onClick={() => use(p)}
+                                                title={canUse ? "" : `В смете «${room.n}» нет работы для этого товара`}>В смету</button>
+                                        </td>
+                                    </tr>
+                                );
+                            }) : (
+                                <tr><td colSpan={6} className="sub" style={{ padding: "18px 0" }}>
+                                    {loading ? "Загружаем…" : "Ничего не нашлось. Снимите часть фильтров."}
+                                </td></tr>
+                            )}
+                        </tbody>
+                    </table>
+                )}
+                {data && (
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", marginTop: 12, flexWrap: "wrap" }}>
+                        <p className="sub" style={{ flex: 1 }}>
+                            {data.meta.total.toLocaleString("ru-RU")} товаров · страница {data.meta.current_page} из {data.meta.last_page}
+                        </p>
+                        <button className="btn g sm" disabled={f.page <= 1} onClick={() => setF(p => ({ ...p, page: p.page - 1 }))}>Назад</button>
+                        <button className="btn g sm" disabled={f.page >= data.meta.last_page} onClick={() => setF(p => ({ ...p, page: p.page + 1 }))}>Вперёд</button>
+                    </div>
+                )}
             </div>
         </section>
     );
