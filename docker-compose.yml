@@ -15,11 +15,16 @@ services:
       # внутри docker-сети БД доступна по имени сервиса и внутреннему порту
       DB_HOST: postgres
       DB_PORT: 5432
+      # выгрузка каталога: при пустой БД загружается автоматически при старте
+      PRODUCTS_FILE: /app/data/products_final.json
+      AUTO_IMPORT: "true"
     depends_on:
-      - postgres
+      postgres:
+        condition: service_healthy
     volumes:
       - ./apps/backend:/app/apps/backend
       - ./database:/app/database
+      - ./products_final.json:/app/data/products_final.json:ro
     networks:
       - app_network
 
@@ -36,6 +41,14 @@ services:
       - .env
     ports:
       - "${DB_PORT}:5432"
+    volumes:
+      # данные БД переживают docker compose down (но не down -v)
+      - pgdata:/var/lib/postgresql
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
     networks:
       - app_network
 

@@ -1,11 +1,12 @@
 /** Эндпоинты: реализованные в apps/backend и запланированные. */
 const ENDPOINTS: { m: string; path: string; d: string; plan?: boolean }[] = [
-    { m: "POST", path: "/api/v1/calc/general", d: "Смета по типу объекта, варианту ремонта и площади" },
-    { m: "POST", path: "/api/v1/calc/room", d: "Подбор материалов под влажность, нагрузку и назначение помещения" },
+    { m: "POST", path: "/api/v1/calc/general", d: "Общий калькулятор: тип объекта и вариант ремонта → смета и список покупок" },
+    { m: "POST", path: "/api/v1/calc/room", d: "Калькулятор комнаты: влажность, назначение, уровень ремонта" },
     { m: "POST", path: "/api/v1/product/{id}/calc", d: "Расчёт количества под размеры на карточке" },
-    { m: "GET", path: "/api/v1/categories/tree", d: "Дерево категорий каталога" },
-    { m: "GET", path: "/api/v1/products/{id}", d: "Карточка товара с характеристиками" },
-    { m: "POST", path: "/api/v1/match", d: "Тип работ и помещения для товара каталога", plan: true },
+    { m: "POST", path: "/api/v1/match", d: "Тип работ и помещения для товара каталога" },
+    { m: "GET", path: "/api/catalog/categories/tree", d: "Дерево категорий каталога" },
+    { m: "GET", path: "/api/catalog/products", d: "Товары с фильтрами и пагинацией" },
+    { m: "GET", path: "/api/catalog/products/{id}", d: "Полная карточка товара с характеристиками" },
     { m: "POST", path: "/api/v1/explain", d: "Пояснение выбора материалов, RAG + локальная модель", plan: true },
     { m: "POST", path: "/api/v1/parse", d: "Параметры ремонта из текстового запроса", plan: true },
 ];
