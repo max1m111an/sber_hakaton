@@ -10,4 +10,11 @@ export default defineConfig({
       "@": path.resolve(__dirname, "./src"),
     },
   },
+  server: {
+    // В dev-режиме запросы к API проксируются на локально запущенный FastAPI
+    proxy: {
+      "/api": process.env.VITE_PROXY_TARGET ?? "http://localhost:8080",
+      "/openapi.json": process.env.VITE_PROXY_TARGET ?? "http://localhost:8080",
+    },
+  },
 })
